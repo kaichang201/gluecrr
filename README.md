@@ -3,6 +3,7 @@ Draft.  Work-in-Progress.
 
 TBD includes
 - ImportGlueDataCatalog needs to be finished
+    - Debug why the SNS Subscription isn't working from Cloudformation, but works from console.
     - Unwrapping the SNS type Notification to get at the Message, which has ExportBatchId, MessageType, etc
     - Get Partition information from S3, cross-region
     - Update the location from Source S3 bucket to Target S3 bucket
