@@ -1,0 +1,14 @@
+[
+    {
+        "ParameterKey": "pDatabasePrefixList",
+        "ParameterValue": "kai|xyz"
+    },
+    {
+        "ParameterKey": "pDatabasePrefixSeparator",
+        "ParameterValue": "|"
+    },
+    {
+        "ParameterKey": "pReplicationSchedule",
+        "ParameterValue": "cron(30 0 * * ? *)"
+    }
+]

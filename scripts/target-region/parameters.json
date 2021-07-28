@@ -1,0 +1,10 @@
+[
+    {
+        "ParameterKey": "pSnsTopicArn",
+        "ParameterValue": "arn:aws:sns:us-east-1:105974918058:GlueMetadataCRRSNSTopic"
+    },
+    {
+        "ParameterKey": "pSnsTopicRegion",
+        "ParameterValue": "us-east-1"
+    }
+]

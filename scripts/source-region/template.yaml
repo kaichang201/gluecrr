@@ -1,0 +1,274 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: "AWS Glue Data Catalog Replication Utility - Source Account"
+
+Parameters:
+  pDatabasePrefixList:
+    Description: "List of database prefixes separated by a token. E.g. raw_data_,processed_data_. To export all databases, do not add this variable"
+    Type: String
+    Default: ""
+  pDatabasePrefixSeparator:
+    Description: "The separator used in the database_prefix_list. E.g. ,. This can be skipped when database_prefix_list is not added"
+    Type: String
+    Default: "|"
+  pReplicationSchedule:
+    Description: "Cron Expression to schedule and trigger Glue catalog replication"
+    Type: String
+    Default: "cron(30 0 * * ? *)"
+  pKmsKeyARNSQS:
+    Description: "KMS Key ARN for SQS Queue"
+    Type: String
+    Default: ""
+  pKmsKeyARNSNS:
+    Description: "KMS Key ARN for SNS Topic"
+    Type: String
+    Default: ""
+
+Resources:
+    ### DynamoDB ###
+#    rGlueDatabaseExportTask:
+#      Type: "AWS::DynamoDB::Table"
+#      Properties:
+#          TableName: "glue_database_export_task"
+#          BillingMode: "PAY_PER_REQUEST"
+#          AttributeDefinitions:
+#            - AttributeName: "db_id"
+#              AttributeType: "S"
+#            - AttributeName: "export_run_id"
+#              AttributeType: "N"
+#          KeySchema:
+#            -
+#              AttributeName: "db_id"
+#              KeyType: "HASH"
+#            -
+#              AttributeName: "export_run_id"
+#              KeyType: "RANGE"
+
+#    rDBStatus:
+#      Type: "AWS::DynamoDB::Table"
+#      Properties:
+#          TableName: "db_status"
+#          BillingMode: "PAY_PER_REQUEST"
+#          AttributeDefinitions:
+#            - AttributeName: "db_id"
+#              AttributeType: "S"
+#            - AttributeName: "export_run_id"
+#              AttributeType: "N"
+#          KeySchema:
+#            -
+#              AttributeName: "db_id"
+#              KeyType: "HASH"
+#            -
+#              AttributeName: "export_run_id"
+#              KeyType: "RANGE"
+
+#    rTableStatus:
+#      Type: "AWS::DynamoDB::Table"
+#      Properties:
+#          TableName: "table_status"
+#          BillingMode: "PAY_PER_REQUEST"
+#          AttributeDefinitions:
+#            - AttributeName: "table_id"
+#              AttributeType: "S"
+#            - AttributeName: "export_run_id"
+#              AttributeType: "N"
+#          KeySchema:
+#            -
+#              AttributeName: "table_id"
+#              KeyType: "HASH"
+#            -
+#              AttributeName: "export_run_id"
+#              KeyType: "RANGE"
+
+    ### SNS ###
+    rGlueMetadataCRRSNSTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: "GlueMetadataCRRSNSTopic"
+        KmsMasterKeyId: !Ref pKmsKeyARNSNS
+
+    ### S3 ###
+    rGlueDataCatalogCRRBucket:
+      Type: "AWS::S3::Bucket"
+      Properties:
+        BucketName: !Join
+          - ''
+          - - 'gluedatacatalog-crr'
+            - !Select [2, !Split ['/', !Ref "AWS::StackId"] ]
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: True
+          BlockPublicPolicy: True
+          IgnorePublicAcls: True
+          RestrictPublicBuckets: True
+        BucketEncryption:
+          ServerSideEncryptionConfiguration:
+            - ServerSideEncryptionByDefault:
+                SSEAlgorithm: AES256
+
+    ### SQS ###
+    rGlueDatabaseSQSQueue:
+      Type: "AWS::SQS::Queue"
+      Properties:
+        QueueName: "GlueMetadataCRRDatabaseSQSQueue"
+        VisibilityTimeout: 360
+        KmsMasterKeyId: !Ref pKmsKeyARNSQS
+    rGlueTableSQSQueue:
+      Type: "AWS::SQS::Queue"
+      Properties:
+        QueueName: "GlueMetadataCRRTableSQSQueue"
+        VisibilityTimeout: 900
+        KmsMasterKeyId: !Ref pKmsKeyARNSQS
+
+    ### IAM ###
+    rGlueCatalogReplicationPolicyRole:
+      Type: "AWS::IAM::Role"
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: lambda.amazonaws.com
+              Action: "sts:AssumeRole"
+        Path: "/"
+        ManagedPolicyArns: 
+          - "arn:aws:iam::aws:policy/AWSLambdaExecute"
+        Policies:
+          - PolicyName: GlueCatalogReplicationPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+              - Effect: Allow
+                Action:
+                  - "glue:GetDatabase"
+                  - "glue:GetPartition"
+                  - "glue:GetTableVersion"
+                  - "glue:GetTables"
+                  - "glue:GetTableVersions"
+                  - "glue:GetPartitions"
+                  - "glue:BatchDeleteTableVersion"
+                  - "glue:BatchGetPartition"
+                  - "glue:GetDatabases"
+                  - "glue:GetTable"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "sqs:DeleteMessage"
+                  - "sqs:ListQueues"
+                  - "sqs:GetQueueUrl"
+                  - "sqs:ListDeadLetterSourceQueues"
+                  - "sqs:ChangeMessageVisibility"
+                  - "sqs:DeleteMessageBatch"
+                  - "sqs:SendMessageBatch"
+                  - "sqs:ReceiveMessage"
+                  - "sqs:SendMessage"
+                  - "sqs:GetQueueAttributes"
+                  - "sqs:ListQueueTags"
+                Resource: 
+                  - '*'
+              - Effect: Allow
+                Action:
+                  - "dynamodb:BatchWriteItem"
+                  - "dynamodb:PutItem"
+                Resource: 
+                  - "*"
+              - Effect: Allow
+                Action:
+                  - "sns:Publish"
+                Resource: 
+                  - "*"
+
+    ### Lambda ###
+    rPublishDatabaseFromDataCatalog:
+      Type: "AWS::Serverless::Function"
+      Properties:
+        CodeUri: ../../target/gluecrr-0.0.1.jar
+        FunctionName: "PublishDatabaseFromDataCatalog"
+        Environment:
+          Variables:
+            source_glue_catalog_id: !Ref 'AWS::AccountId'
+            database_prefix_list: !Ref pDatabasePrefixList
+            separator: !Ref pDatabasePrefixSeparator
+            region: !Ref 'AWS::Region'
+            sqs_queue_url_glue_database: !Ref rGlueDatabaseSQSQueue
+        Handler: org.kai.lambda.PublishDatabaseFromDataCatalog
+        Runtime: java8
+        Description: "Get List of Database from Glue and Publish to SQS"
+        MemorySize: 512
+        Timeout: 120
+        Role: !GetAtt rGlueCatalogReplicationPolicyRole.Arn
+
+    rPublishTableNameLambda:
+      Type: "AWS::Serverless::Function"
+      Properties:
+        CodeUri: ../../target/gluecrr-0.0.1.jar
+        FunctionName: "PublishDatabaseTablesLambda"
+        Environment:
+          Variables:
+            sqs_queue_url_glue_table: !Ref rGlueTableSQSQueue
+            region: !Ref 'AWS::Region'
+        Handler: org.kai.lambda.PublishDatabaseTablesLambda
+        Runtime: java8
+        Description: "Export Database Lambda"
+        MemorySize: 512
+        Timeout: 120
+        Role: !GetAtt rGlueCatalogReplicationPolicyRole.Arn
+
+    rPublishTableSchemaLambda:
+      Type: "AWS::Serverless::Function"
+      Properties:
+        CodeUri: ../../target/gluecrr-0.0.1.jar
+        FunctionName: "PublishTableSchemaLambda"
+        Environment:
+          Variables:
+            region: !Ref 'AWS::Region'
+            s3_bucket_name: !Ref rGlueDataCatalogCRRBucket
+            sns_topic_arn_publish_glue_data_catalog: !Ref rGlueMetadataCRRSNSTopic
+        Handler: org.kai.lambda.PublishTableSchemaLambda
+        Runtime: java8
+        Description: "Export Table Lambda"
+        MemorySize: 512
+        Timeout: 300
+        Role: !GetAtt rGlueCatalogReplicationPolicyRole.Arn
+
+    ### Event Source Mapping.  Allows SQS to trigger Lambda functions ###
+    rExportDatabaseLambdaSQSPermission:
+      Type: AWS::Lambda::EventSourceMapping
+      Properties:
+        BatchSize: 1
+        Enabled: True
+        EventSourceArn: !GetAtt rGlueDatabaseSQSQueue.Arn
+        FunctionName: !GetAtt rPublishTableNameLambda.Arn
+    rExportTableLambdaSQSPermission:
+      Type: AWS::Lambda::EventSourceMapping
+      Properties:
+        BatchSize: 1
+        Enabled: True
+        EventSourceArn: !GetAtt rGlueTableSQSQueue.Arn
+        FunctionName: !GetAtt rPublishTableSchemaLambda.Arn
+
+    ### Event Rule.  Allows Cloud Watch Event Rule cron-style scheduling to trigger the Glue Data Catalog scan
+        #    rReplicationLambdaTriggerRule:
+        #      Type: "AWS::Events::Rule"
+        #      Properties:
+        #        Name: "glue-catalog-replication-trigger"
+        #        Description: Glue catalog Replication Lambda Trigger
+        #        State: ENABLED
+        #        ScheduleExpression: !Ref pReplicationSchedule
+        #        Targets:
+        #          - Id: "glue-catalog-replication-trigger"
+        #            Arn: !GetAtt rGDCReplicationPlannerLambda.Arn
+        #
+        #    rPermissionEventsInvokeRoutingLambda:
+        #      Type: AWS::Lambda::Permission
+        #      Properties:
+        #        FunctionName: !Ref rGDCReplicationPlannerLambda
+        #        Action: "lambda:InvokeFunction"
+        #        Principal: "events.amazonaws.com"
+        #        SourceArn: !GetAtt rReplicationLambdaTriggerRule.Arn
+
+Outputs:
+  SnsTopicArn:
+    Value: !Ref rGlueMetadataCRRSNSTopic
+  SnsTopicKmsKeyARN:
+    Value: !Ref pKmsKeyARNSNS
