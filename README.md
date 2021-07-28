@@ -10,6 +10,7 @@ TBD includes
     - Primary, Replica
     - Primary, Multiple Replicas
     - Multiple Primary, Multiple Replicas
+- Draw diagrams
 
 # AWS Glue Data Catalog Cross Region Replication (CRR) Utility
 This Utility is used to replicate Glue Data Catalog from one AWS region to another region.
