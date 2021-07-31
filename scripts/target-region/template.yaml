@@ -82,7 +82,26 @@ Resources:
 #        VisibilityTimeout: 195
 #        KmsMasterKeyId: !Ref pKmsKeyARNSQS
 
-    ### IAM ###
+    ### SQS Queue Policy to allow SNS to push messages onto SQS ###
+    rGlueMetadataCRRQueuePolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues:
+          - !Ref rGlueMetadataCRRSQSSubscriberToSNS
+        PolicyDocument:
+          Statement:
+            - Sid: Allow-SNS-SendMessage
+              Effect: "Allow"
+              Principal:
+                AWS: "*"
+              Action:
+                - "SQS:SendMessage"
+              Resource: !GetAtt rGlueMetadataCRRSQSSubscriberToSNS.Arn
+              Condition:
+                ArnLike:
+                  aws:SourceArn: !Ref pSnsTopicArn
+
+  ### IAM ###
     rGlueCatalogReplicationPolicyRole:
       Type: "AWS::IAM::Role"
       Properties:
@@ -92,7 +111,8 @@ Resources:
             - Effect: Allow
               Principal:
                 Service: lambda.amazonaws.com
-              Action: "sts:AssumeRole"
+              Action:
+                - "sts:AssumeRole"
         Path: "/"
         ManagedPolicyArns: 
           - "arn:aws:iam::aws:policy/AWSLambdaExecute"

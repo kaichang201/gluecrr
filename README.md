@@ -2,16 +2,15 @@
 Draft.  Work-in-Progress.
 
 TBD includes
-- ImportGlueDataCatalog needs to be finished
-    - Debug why the SNS Subscription isn't working from Cloudformation, but works from console.
+- Finish importGlueDataCatalog
     - Unwrapping the SNS type Notification to get at the Message, which has ExportBatchId, MessageType, etc
     - Get Partition information from S3, cross-region
     - Update the location from Source S3 bucket to Target S3 bucket
-- Supported Patterns testing
+- Test supported patterns
     - Primary, Replica
     - Primary, Multiple Replicas
     - Multiple Primary, Multiple Replicas
-- Draw diagrams
+
 
 # AWS Glue Data Catalog Cross Region Replication (CRR) Utility
 This Utility is used to replicate Glue Data Catalog from one AWS region to another region.
