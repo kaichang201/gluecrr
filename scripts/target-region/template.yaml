@@ -19,6 +19,19 @@ Parameters:
     Description: "KMS Key ARN for SNS Topic"
     Type: String
     Default: ""
+  pS3SourceToTargetMapList:
+    Description: "List of Mappings from Source Region's S3 Bucket to Target Region's S3 Bucket"
+    Type: String
+    Default: ""
+  pS3SourceToTargetMapListSeparator:
+    Description: "Separator for List of Mappings"
+    Type: String
+    Default: ","
+  pS3SourceToTargetMapListValuesSeparator:
+    Description: "Separator for Values Region|SourceS3Bucket|TargetS3Bucket"
+    Type: String
+    Default: "|"
+
 
 
 Resources:
@@ -180,8 +193,11 @@ Resources:
         Environment:
           Variables:
             region: !Ref 'AWS::Region'
-#            sqs_queue_url_large_tables: !Ref rLargeTableSQSQueue
-#            dlq_url_sqs: !Ref rDeadLetterQueue
+            target_glue_catalog_id: !Ref 'AWS::AccountId'
+            S3SourceToTargetMapList: !Ref pS3SourceToTargetMapList
+            S3SourceToTargetMapListSeparator: !Ref pS3SourceToTargetMapListSeparator
+            S3SourceToTargetMapListValuesSeparator: !Ref pS3SourceToTargetMapListValuesSeparator
+            skip_archive: "true"
         Handler: org.kai.lambda.ImportGlueDataCatalog
         Runtime: java8
         Description: "Import Glue Data Catalog metadata"

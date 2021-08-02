@@ -6,5 +6,17 @@
     {
         "ParameterKey": "pSnsTopicRegion",
         "ParameterValue": "us-east-1"
+    },
+    {
+        "ParameterKey": "pS3SourceToTargetMapList",
+        "ParameterValue": "us-west-2|kai-databucket|kai-databucket-uswest2-replica,us-west-1|kai-databucket|kai-databucket-uswest1-replica"
+    },
+    {
+        "ParameterKey": "pS3SourceToTargetMapListSeparator",
+        "ParameterValue": ","
+    },
+    {
+        "ParameterKey": "pS3SourceToTargetMapListValuesSeparator",
+        "ParameterValue": "|"
     }
 ]

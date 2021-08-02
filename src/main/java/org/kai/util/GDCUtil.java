@@ -18,6 +18,93 @@ public class GDCUtil {
 	/**
 	 * This method processes a Message that belongs to Table schema
 	 * @param glue
+	 * @param targetGlueCatalogId
+	 * @param table
+	 * @param partitions
+	 * @param exportBatchId
+	 * @param skipTableArchive
+	 * @param sourceRegion
+	 */
+	public void processTableSchema(AWSGlue glue, String targetGlueCatalogId, Table table, List<Partition> partitions, String exportBatchId, boolean skipTableArchive, String sourceRegion) {
+
+		DDBUtil ddbUtil = new DDBUtil();
+		SQSUtil sqsUtil = new SQSUtil();
+		GlueUtil glueUtil = new GlueUtil();
+		long importRunId = System.currentTimeMillis();
+
+		// Create or update table
+		TableReplicationStatus tableStatus = glueUtil.createOrUpdateTable(glue, table, targetGlueCatalogId, skipTableArchive);
+
+		// If database not found then create one
+		if (tableStatus.isDbNotFoundError()) {
+			System.out.printf("Creating Database with name: '%s'. \n", table.getDatabaseName());
+			DBReplicationStatus dbStatus = glueUtil.createGlueDatabase(glue, targetGlueCatalogId, table.getDatabaseName(), "Database Imported from Glue Data Catalog of region: ".concat(sourceRegion));
+
+			// Now, try to create / update table again.
+			if (dbStatus.isCreated()) {
+				tableStatus = glueUtil.createOrUpdateTable(glue, table, targetGlueCatalogId, skipTableArchive);
+			}
+		}
+
+		// Update table partitions
+		if (!tableStatus.isError()) {
+			// Get table partitions from Target Account
+			List<Partition> partitionsB4Replication = glueUtil.getPartitions(glue, targetGlueCatalogId, table.getDatabaseName(), table.getName());
+			System.out.println("Number of partitions before replication: " + partitionsB4Replication.size());
+
+			// Add Partitions to the table if the export has Partitions
+			if (partitions.size() > 0) {
+				tableStatus.setExportHasPartitions(true);
+				if (partitionsB4Replication.size() == 0) {
+					System.out.println("Target has 0 partitions.  Adding partitions from source.");
+					boolean partitionsAdded = glueUtil.addPartitions(glue, partitions, targetGlueCatalogId, table.getDatabaseName(), table.getName());
+					if (partitionsAdded)
+						tableStatus.setPartitionsReplicated(true);
+				} else {
+					System.out.println("Target table has partitions. Partitions will be deleted before adding partitions from source.");
+					// delete partitions in batch mode
+					boolean partitionsDeleted = glueUtil.deletePartitions(glue, targetGlueCatalogId, table.getDatabaseName(), table.getName(), partitionsB4Replication);
+
+					// Enable the below code for debugging purpose. Check number of table partitions after deletion
+					List<Partition> partitionsAfterDeletion = glueUtil.getPartitions(glue, targetGlueCatalogId, table.getDatabaseName(), table.getName());
+					System.out.println("Number of partitions after deletion: " + partitionsAfterDeletion.size());
+
+					// add partitions from S3 object
+					boolean partitionsAdded = glueUtil.addPartitions(glue, partitions, targetGlueCatalogId, table.getDatabaseName(), table.getName());
+
+					if (partitionsDeleted && partitionsAdded)
+						tableStatus.setPartitionsReplicated(true);
+
+					// Enable the below code for debugging purpose. Check number of table partitions after addition
+					List<Partition> partitionsAfterAddition = glueUtil.getPartitions(glue, targetGlueCatalogId, table.getDatabaseName(), table.getName());
+					System.out.println("Number of partitions after addition: " + partitionsAfterAddition.size());
+				}
+			} else if (partitions.size() == 0) {
+				tableStatus.setExportHasPartitions(false);
+				if (partitionsB4Replication.size() > 0) {
+					// Export has no partitions but table already has some partitions. Those
+					// partitions will be deleted in batch mode.
+					boolean partitionsDeleted = glueUtil.deletePartitions(glue, targetGlueCatalogId, table.getDatabaseName(), table.getName(), partitionsB4Replication);
+					if (partitionsDeleted)
+						System.out.println("Info: Source had 0 partitions, so deleted target partitions: " + partitionsB4Replication.size());
+				}
+			}
+		}
+		// If there is any error in creating/updating table then send it to DLQ
+		else {
+			System.out.println("Error: Unable to create/update table in the Glue Data Catalog.");
+		}
+		// Track status in DynamoDB
+		System.out.printf(
+				"Processing of Table shcema completed. Result: Table replicated: %b, Export has partitions: %b, "
+						+ "Partitions replicated: %b, error: %b \n",
+				tableStatus.isReplicated(), tableStatus.isExportHasPartitions(), tableStatus.isPartitionsReplicated(),
+				tableStatus.isError());
+	}
+
+	/**
+	 * This method processes a Message that belongs to Table schema
+	 * @param glue
 	 * @param sqs
 	 * @param targetGlueCatalogId
 	 * @param sourceGlueCatalogId

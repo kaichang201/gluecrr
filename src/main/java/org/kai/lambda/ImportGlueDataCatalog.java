@@ -7,21 +7,22 @@ import com.amazonaws.ClientConfiguration;
 import com.amazonaws.regions.Regions;
 import com.amazonaws.services.glue.AWSGlue;
 import com.amazonaws.services.glue.AWSGlueClientBuilder;
-import com.amazonaws.services.glue.model.Database;
+import com.amazonaws.services.glue.model.Partition;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.events.SQSEvent;
 import com.amazonaws.services.sqs.AmazonSQS;
 import com.amazonaws.services.sqs.AmazonSQSClientBuilder;
 import com.google.gson.Gson;
-import com.google.gson.JsonSyntaxException;
+import com.jayway.jsonpath.JsonPath;
 import org.kai.util.Constants.AttributeValue;
 import org.kai.util.Constants.MessageType;
+import org.kai.util.GDCUtil;
 import org.kai.util.TableInfo;
 
 
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * This class has AWS Lambda Handler method. It long-polls SQS, parse the
@@ -36,9 +37,15 @@ public class ImportGlueDataCatalog implements RequestHandler<SQSEvent, Object> {
 	public Object handleRequest(SQSEvent event, Context context) {
 		
 		String region = Optional.ofNullable(System.getenv("region")).orElse(Regions.US_WEST_2.getName());
+		String targetGlueCatalogId = Optional.ofNullable(System.getenv("target_glue_catalog_id")).orElse("1234567890");
+		String S3SourceToTargetMapList = Optional.ofNullable(System.getenv("S3SourceToTargetMapList")).orElse("");
+		String S3SourceToTargetMapListSeparator = Optional.ofNullable(System.getenv("S3SourceToTargetMapListSeparator")).orElse(",");
+		String S3SourceToTargetMapListValuesSeparator = Optional.ofNullable(System.getenv("S3SourceToTargetMapListValuesSeparator")).orElse("|");
+		boolean skipTableArchive = Boolean.parseBoolean(Optional.ofNullable(System.getenv("skip_archive")).orElse("true"));
 
 		// Print environment variables
-		printEnvVariables( region);
+		printEnvVariables (region, targetGlueCatalogId, S3SourceToTargetMapList, S3SourceToTargetMapListSeparator, S3SourceToTargetMapListValuesSeparator);
+		Map<String, String> s3SourceToTargetMap  = tokenizeS3SourceToTargetMapList (region, S3SourceToTargetMapList, S3SourceToTargetMapListSeparator, S3SourceToTargetMapListValuesSeparator);
 
 		// Set client configuration
 		ClientConfiguration cc = new ClientConfiguration();
@@ -46,42 +53,75 @@ public class ImportGlueDataCatalog implements RequestHandler<SQSEvent, Object> {
 
 		// Create Objects for Glue and SQS
 		AWSGlue glue = AWSGlueClientBuilder.standard().withRegion(region).withClientConfiguration(cc).build();
-		AmazonSQS sqs = AmazonSQSClientBuilder.standard().withRegion(region).withClientConfiguration(cc).build();
+
+		GDCUtil gdcUtil = new GDCUtil();
+
 
 		// Process records
 		/**
 		 * Iterate and process all the messages which are part of SQSEvent
+		 * SNS -> SQS -> Lambda is not the same as SQS -> Lambda.  Using JsonPath to pull the Type and MessageBody and Attributes.
 		 */
 		System.out.println("Number of messages in SQS Event: " + event.getRecords().size());
 		Gson gson = new Gson();
 		for (SQSEvent.SQSMessage msg : event.getRecords()) {
 			String payLoad = msg.getBody();
+			String internalBodyType = JsonPath.read(payLoad, "$.Type");
+			String internalBodyMsg = JsonPath.read(payLoad, "$.Message");
+			Map<String, HashMap> internalBodyMsgAttributes = JsonPath.read(payLoad, "$.MessageAttributes");
+			System.out.println("Type: " + internalBodyType);
+			System.out.println("Message: " + internalBodyMsg);
+			System.out.println("MessageAttributes: " + internalBodyMsgAttributes);
 			String msgExportBatchId = "";
 			String msgSourceGlueCatalogId = "";
 			String msgMessageType = "";
 
-			// Read Message Attributes
-			for (Map.Entry<String, SQSEvent.MessageAttribute> entry : msg.getMessageAttributes().entrySet()) {
+			if (!"Notification".equals(internalBodyType)) {
+				System.out.println("Error: Expected SNS Type Notification.  Received: " + payLoad);
+				return "Failure";
+			}
+			// Read SQS Message Attributes
+			for (Map.Entry<String, HashMap> entry : internalBodyMsgAttributes.entrySet()) {
 				if (AttributeValue.ExportBatchId.equalsIgnoreCase(entry.getKey())) {
-					msgExportBatchId = entry.getValue().getStringValue();
+					msgExportBatchId = (String) entry.getValue().get("Value");
 					System.out.println("Export Batch Id: " + msgExportBatchId);
 				} else if (AttributeValue.SourceGlueDataCatalogId.equalsIgnoreCase(entry.getKey())) {
-					msgSourceGlueCatalogId = entry.getValue().getStringValue();
+					msgSourceGlueCatalogId = (String) entry.getValue().get("Value");
 					System.out.println("Source Glue Data Catalog Id: " + msgSourceGlueCatalogId);
 				} else if (AttributeValue.MessageType.equalsIgnoreCase(entry.getKey())) {
-					msgMessageType = entry.getValue().getStringValue();
+					msgMessageType = (String) entry.getValue().get("Value");
 					System.out.println("Message Type " + msgMessageType);
 				}
 			}
 			if (msgMessageType.equalsIgnoreCase(MessageType.TableInfo.toString())) {
-				TableInfo tbi = gson.fromJson(payLoad, TableInfo.class);
+				TableInfo tbi = gson.fromJson(internalBodyMsg, TableInfo.class);
 				if (Optional.ofNullable(tbi).isPresent()) {
 					System.out.println("Info: Deserialized tableinfo" + tbi.toString());
-					if (!tbi.isLargeTable()) {  // Regular table
+					List<Partition> partitionInfo = tbi.getPartitionList(); // prime the PartitionInfo, if necessary
+					System.out.println("Info: Deserialized tablepartitioninfo" + partitionInfo);
+					String s3Location = tbi.getTable().getStorageDescriptor().getLocation();
+					String s3Bucket = s3Location.substring(0,ordinalIndexOf(s3Location, "/", 3));
+					String s3BucketShort = s3Bucket.substring(5); // cut the s3://
+					System.out.println("Source S3 Location:" + s3Location + " bucket: " + s3BucketShort);
 
-					} else {  // Large Table
-
+					if (!s3SourceToTargetMap.containsKey(s3BucketShort)) {
+						System.out.println("Warning: Did not find mapping from S3 Bucket " + s3BucketShort + " to local bucket. Will not copy meta");
+						return "Success";
 					}
+					String s3TargetBucket = "s3://"+s3SourceToTargetMap.get(s3BucketShort);
+					tbi.getTable().getStorageDescriptor().setLocation(s3Location.replaceFirst(s3Bucket, s3TargetBucket));
+					System.out.println("Replaced Table Location " + tbi.getTable().getStorageDescriptor().getLocation());
+
+					for (Partition p : partitionInfo) {
+						String partitionLocation = p.getStorageDescriptor().getLocation();
+						String partitionBucket = partitionLocation.substring(0,ordinalIndexOf(partitionLocation, "/", 3));
+						String partitionBucketShort = partitionBucket.substring(5); // cut the s3://
+						System.out.println("Source partition Location:" + partitionLocation + " partition Bucket: " + partitionBucketShort);
+						p.getStorageDescriptor().setLocation(partitionLocation.replaceFirst(partitionBucket, s3TargetBucket ));
+						System.out.println("Replaced with target partition Location: " + p.getStorageDescriptor().getLocation());
+					}
+					gdcUtil.processTableSchema(glue, targetGlueCatalogId, tbi.getTable(), partitionInfo,  msgExportBatchId, skipTableArchive, tbi.getRegion());
+
 
 				} else {
 					System.out.println("Error: Could not deserialize payload.  Expected TableInfo, received: " + payLoad);
@@ -93,86 +133,55 @@ public class ImportGlueDataCatalog implements RequestHandler<SQSEvent, Object> {
 		return "Success";
 	}
 
-	/**
-	 * This method processes SNS event and has the business logic to import
-	 * Databases and Tables to Glue Catalog
-	 * @param context
-	 * @param snsRecods
-	 * @param glue
-	 * @param sqs
-	 * @param sqsQueueURL
-	 * @param sqsQueueURLLargeTable
-	 * @param targetGlueCatalogId
-	 * @param ddbTblNameForDBStatusTracking
-	 * @param ddbTblNameForTableStatusTracking
-	 * @param skipTableArchive
-	 * @param region
-	 */
-//	public void processSNSEvent(Context context, List<SNSRecord> snsRecods, AWSGlue glue, AmazonSQS sqs,
-//			String sqsQueueURL, String sqsQueueURLLargeTable, String targetGlueCatalogId,
-//			String ddbTblNameForDBStatusTracking, String ddbTblNameForTableStatusTracking, boolean skipTableArchive,
-//			String region) {
-//
-//		SQSUtil sqsUtil = new SQSUtil();
-//		for (SNSRecord snsRecod : snsRecods) {
-//			boolean isDatabaseType = false;
-//			boolean isTableType = false;
-//			boolean isLargeTable = false;
-//			LargeTable largeTable = null;
-//			Database db = null;
-//			TableWithPartitions table = null;
-//			Gson gson = new Gson();
-//			String message = snsRecod.getSNS().getMessage();
-//			context.getLogger().log("SNS Message Payload: " + message);
-//
-//			// Get message attributes from the SNS Payload
-//			Map<String, MessageAttribute> msgAttributeMap = snsRecod.getSNS().getMessageAttributes();
-//			MessageAttribute msgTypeAttr = msgAttributeMap.get("message_type");
-//			MessageAttribute sourceCatalogIdAttr = msgAttributeMap.get("source_catalog_id");
-//			MessageAttribute exportBatchIdAttr = msgAttributeMap.get("export_batch_id");
-//			String sourceGlueCatalogId = sourceCatalogIdAttr.getValue();
-//			String exportBatchId = exportBatchIdAttr.getValue();
-//			context.getLogger().log("Message Type: " + msgTypeAttr.getValue());
-//			context.getLogger().log("Source Catalog Id: " + sourceGlueCatalogId);
-//
-//			// Serialize JSON String based on the message type
-//			try {
-//				if (msgTypeAttr.getValue().equalsIgnoreCase("database")) {
-//					db = gson.fromJson(message, Database.class);
-//					isDatabaseType = true;
-//				} else if (msgTypeAttr.getValue().equalsIgnoreCase("table")) {
-//					table = gson.fromJson(message, TableWithPartitions.class);
-//					isTableType = true;
-//				} else if (msgTypeAttr.getValue().equalsIgnoreCase("largeTable")) {
-//					largeTable = gson.fromJson(message, LargeTable.class);
-//					isLargeTable = true;
-//				}
-//			} catch (JsonSyntaxException e) {
-//				System.out.println("Cannot parse SNS message to Glue Database Type.");
-//				e.printStackTrace();
-//			}
-//
-//			// Execute the business logic based on the message type
-//			GDCUtil gdcUtil = new GDCUtil();
-//			if (isDatabaseType) {
-//				gdcUtil.processDatabseSchema(glue, sqs, targetGlueCatalogId, db, message, sqsQueueURL, sourceGlueCatalogId,
-//						exportBatchId, ddbTblNameForDBStatusTracking);
-//			} else if (isTableType) {
-//				gdcUtil.processTableSchema(glue, sqs, targetGlueCatalogId, sourceGlueCatalogId, table, message,
-//						ddbTblNameForTableStatusTracking, sqsQueueURL, exportBatchId, skipTableArchive);
-//			} else if (isLargeTable) {
-//				sqsUtil.sendLargeTableSchemaToSQS(sqs, sqsQueueURLLargeTable, exportBatchId, sourceGlueCatalogId,
-//						message, largeTable);
-//			}
-//		}
-//	}
 
 	/**
 	 * Print environment variables
 	 * @param region
+	 * @param target_glue_catalog_id
+	 * @param S3SourceToTargetMapList
+	 * @param S3SourceToTargetMapListSeparator
+	 * @param S3SourceToTargetMapListValuesSeparator
 	 */
-	public void printEnvVariables(String region) {
+	public void printEnvVariables(String region, String target_glue_catalog_id, String S3SourceToTargetMapList, String S3SourceToTargetMapListSeparator, String S3SourceToTargetMapListValuesSeparator) {
 		System.out.println("Region: " + region);
+		System.out.println("Target Account: " + target_glue_catalog_id);
+		System.out.println("S3SourceToTargetMapList: " + S3SourceToTargetMapList);
+		System.out.println("S3SourceToTargetMapListSeparator: " + S3SourceToTargetMapListSeparator);
+		System.out.println("S3SourceToTargetMapListValuesSeparator: " + S3SourceToTargetMapListValuesSeparator);
+
+	}
+
+	public Map<String, String> tokenizeS3SourceToTargetMapList (String region, String S3SourceToTargetMapList, String S3SourceToTargetMapListSeparator, String S3SourceToTargetMapListValuesSeparator) {
+		Map<String, String> returnValue = new HashMap<>();
+
+		List<String> mapList = Collections.list(new StringTokenizer(S3SourceToTargetMapList, S3SourceToTargetMapListSeparator)).stream()
+				.map(token -> (String) token)
+				.collect(Collectors.toList());
+		System.out.println("Number of prefixes: " + mapList.size());
+		for (String m: mapList) {
+			List<String> s2t = Collections.list(new StringTokenizer(m, S3SourceToTargetMapListValuesSeparator)).stream()
+					.map(token -> (String) token)
+					.collect(Collectors.toList());
+			if (s2t.size() != 3) {
+				System.out.println("Error: Expected 3 values in formation TargetRegion|SourceS3Bucket|TargetS3Bucket.  Instead found: " + m );
+			}
+			if (region.equals(s2t.get(0))) {
+				System.out.println("Processing: mapping for this region: " + region);
+				returnValue.put(s2t.get(1), s2t.get(2)); // add to mapping
+			} else {
+				System.out.println("Skipping: mapping not for this region: " + region + " but for another region: " + s2t.get(0));
+			}
+		}
+		System.out.println("returning map: " + returnValue);
+
+		return returnValue;
+	}
+
+	public static int ordinalIndexOf(String str, String substr, int n) {
+		int pos = str.indexOf(substr);
+		while (--n > 0 && pos != -1)
+			pos = str.indexOf(substr, pos + 1);
+		return pos;
 	}
 
 	

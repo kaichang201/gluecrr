@@ -88,6 +88,9 @@ public class TableInfo {
 	public int getPartitionThreshold() {
 		return partitionThreshold;
 	}
+	public String getRegion() {
+		return region;
+	}
 
 	public boolean isLargeTable() {
 		return largeTable;
@@ -97,7 +100,7 @@ public class TableInfo {
 		if (!largeTable || partitionList != null) {  // small table, or large table but partition list already loaded
 			System.out.println("Not Large Table.  Return Partition info from embedded SNS message");
 		} else {  //  large table and partition list not yet loaded. So let's try to load it.
-			System.out.println("Large Table.  Return Partition info from embedded S3 Object");
+			System.out.println("Large Table.  Retrieve Partition info from S3 Bucket and Object");
 			String contentType = "";
 			Gson gson = new Gson();
 			S3Object fullObject = null;

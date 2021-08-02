@@ -1,14 +1,7 @@
 # INCOMPLETE
 Draft.  Work-in-Progress.
-
 TBD includes
-- Finish importGlueDataCatalog
-    - Unwrapping the SNS type Notification to get at the Message, which has ExportBatchId, MessageType, etc
-    - Get Partition information from S3, cross-region
-    - Update the location from Source S3 bucket to Target S3 bucket
 - Test supported patterns
-    - Primary, Replica
-    - Primary, Multiple Replicas
     - Multiple Primary, Multiple Replicas
 
 
