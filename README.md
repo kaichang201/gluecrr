@@ -1,9 +1,3 @@
-# INCOMPLETE
-Draft.  Work-in-Progress.
-TBD includes
-- Test supported patterns
-    - Multiple Primary, Multiple Replicas
-
 
 # AWS Glue Data Catalog Cross Region Replication (CRR) Utility
 This Utility is used to replicate Glue Data Catalog from one AWS region to another region.
@@ -27,7 +21,7 @@ to multiple SNS.
 ## Support patterns
 ### Primary, Replica
 One Source region with 1 SNS.  One Target region with 1 SQS subscribing to Source region's SNS.
-
+![Alt](./src/test/resources/gdccrr1.png)
 ### Primary, Multiple Replicas
 One Source region with 1 SNS.  Multiple Target regions, each with 1 SQS subscribing to Source region's SNS.
 
@@ -35,7 +29,7 @@ One Source region with 1 SNS.  Multiple Target regions, each with 1 SQS subscrib
 Multiple regions, each acting as Source and Target.
 - The Source deployment provides 1 SNS
 - The Target deployment provides 1 SQS, and subscribe to SNS of every other region
-
+  ![Alt](./src/test/resources/gdccrr2.png)
 
 ## Build Instructions
 1. The source code is Maven.  You can build it using standard Maven commands e.g. '''mvn -v clean install'''.
@@ -94,11 +88,17 @@ This utility uses the following AWS services
     If in the future there is use-case to fanout the Database messages, an SNS topic may be more appropriate.
   - Why is there separate the Lambda publishing tables and table-schema?  Why not keep it as 1 lambda?
     - I am not really sure if there is a case where, due to table size or partitions, publishing a table schema 
-    would take a long time.  It seemed more scalable to let each table have its own lambda invocation.
-  - Why is the SNS pushing to an SQS+Lambda?  Why not notify the Lambda directly and save the processing and cost of more queues??
+    would take a long time.  It seemed more scalable manage scalability as a function of lambda's concurrency.
+  - Why is the SNS pushing to an SQS+Lambda?  Why not notify the Lambda directly from the SNS?
     - Please feel free to make that modification. It's a simple update to scripts/target-region/template.yaml.
     The choice to use SNS -> SQS -> Lambda is specific to my local restrictions.
+  - Why no Dead-Letter-Queue?
+    - I couldn't think of an occasion where, if consumption failed, the CloudWatch log on the Import lambda would not be sufficient.
+    But it would probably be better to slim down the debug logs on the Import lambda and handle exceptions in a DLQ and DLQ Lambda.  TBD.
 
-## Optional TBD
+## TBD
 - DynamoDB for audit trails
 - Cloudwatch events for cron-style scheduling
+- DLQ on Target accounts
+- Code clean-up
+- Diagram
