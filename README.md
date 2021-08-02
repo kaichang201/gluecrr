@@ -98,6 +98,7 @@ This utility uses the following AWS services
 
 ## TBD
 - Update Source Parameters so that each database prefix is region-specific. This makes multi-primary scenario easier to configure.
+- DynamoDB for configuration
 - DynamoDB for audit trails
 - Cloudwatch events for cron-style scheduling
 - DLQ on Target accounts

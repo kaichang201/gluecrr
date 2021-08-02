@@ -1,7 +1,7 @@
 [
     {
         "ParameterKey": "pDatabasePrefixList",
-        "ParameterValue": "kai|xyz"
+        "ParameterValue": "useast1:kai|xyz,uswest2:abc|foo"
     },
     {
         "ParameterKey": "pDatabasePrefixSeparator",
