@@ -99,10 +99,21 @@ This utility uses the following AWS services
 ## TBD
 - Multi-Primary 
   - Update Source Parameters so that each database prefix is region-specific.
-  - Update SNSTopic
-- DynamoDB for configuration
-- DynamoDB for audit trails
-- Cloudwatch events for cron-style scheduling
-- DLQ on Target accounts
-- Code clean-up
-- Diagram
+  - Update SNS Subscription so SQS can subscribe to multiple SNS, ever SNS except the one in its own region.
+- Refactor
+  - Move configuration to DynamoDB or Parameter Store
+    - On-hold or now.
+    - DyanmoDB would incur storage and read/write costs. Could be worthwhile as part of a bigger architecture,
+    but standalone does not seem superior to lambda environment variables.
+    - Parameter Store, if using standard and normal through-put, would be free.  But it would be slower than lambda environment
+    variables.  Could be worthwhile as part of a bigger architecture.
+  - DynamoDB for audit trails
+    - On-hold.  CloudWatch already has all the data. Could be worthwhile as part of a bigger architecture,
+    assuming that architecture is based upon DynamoDB and not CloudWatch for log consolidation.
+  - DLQ on Target accounts
+    - On-hold.  Uncertain what messages would get dropped, if it did why we wouldn't already track it through CloudWatch.
+  - Code clean-up
+    - On-going.
+  - Cloudwatch events for cron-style scheduling
+    - On-hold.  Trivial to integrate. For PoC, ad-hod start through Lambda console "Test" button more useful.
+
