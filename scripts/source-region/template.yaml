@@ -4,11 +4,15 @@ Description: "AWS Glue Data Catalog Replication Utility - Source Account"
 
 Parameters:
   pDatabasePrefixList:
-    Description: "List of database prefixes separated by a token. E.g. raw_data_,processed_data_. To export all databases, do not add this variable"
+    Description: "List of regions and its primary databases.  E.g. 'us-east-1|abcdb|bbcdb,us-west2|foodb|bardb'. To export all databases in a region, do not include that region or values for that region"
     Type: String
     Default: ""
+  pDatabasePrefixListSeparator:
+    Description: "The separator used in the DatabasePrefixList. E.g. The comma (,) 'us-east-1|abcdb|bbcdb,us-west2|foodb|bardb'."
+    Type: String
+    Default: ","
   pDatabasePrefixSeparator:
-    Description: "The separator used in the database_prefix_list. E.g. ,. This can be skipped when database_prefix_list is not added"
+    Description: "The separator used in the database_prefix_list. E.g. The pipe (|) 'us-east-1|abcdb|bbcdb,us-west2|foodb|bardb'"
     Type: String
     Default: "|"
   pReplicationSchedule:
@@ -188,6 +192,7 @@ Resources:
           Variables:
             source_glue_catalog_id: !Ref 'AWS::AccountId'
             database_prefix_list: !Ref pDatabasePrefixList
+            list_separator: !Ref pDatabasePrefixListSeparator
             separator: !Ref pDatabasePrefixSeparator
             region: !Ref 'AWS::Region'
             sqs_queue_url_glue_database: !Ref rGlueDatabaseSQSQueue

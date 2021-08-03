@@ -100,6 +100,10 @@ This utility uses the following AWS services
 - Multi-Primary 
   - Update Source Parameters so that each database prefix is region-specific.
   - Update SNS Subscription so SQS can subscribe to multiple SNS, ever SNS except the one in its own region.
+    - Would require refactoring SNS Subscription.  Cloudformation does not support a foreach looping,
+      and AWS::SNS::Subscription Region and TopicArn expect String not List<String>.  So for SQS to subscribe to multiple
+      SNS, we would need to remove the AWS::SNS:Subscription from CloudFormation and handle the subscription as a script.
+      It would need to parse lists of ARNTopics and use "aws sns subscribe --topic-arn --protocol sqs --notification-endpoint <ARN-of-SQS>" on each. 
 - Refactor
   - Move configuration to DynamoDB or Parameter Store
     - On-hold or now.

@@ -1,7 +1,11 @@
 [
     {
         "ParameterKey": "pDatabasePrefixList",
-        "ParameterValue": "kai|xyz"
+        "ParameterValue": "us-east-1|kai|xyz,us-west-2|foodb|bardb"
+    },
+    {
+        "ParameterKey": "pDatabasePrefixListSeparator",
+        "ParameterValue": ","
     },
     {
         "ParameterKey": "pDatabasePrefixSeparator",

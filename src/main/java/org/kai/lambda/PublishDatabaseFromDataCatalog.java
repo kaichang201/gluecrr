@@ -39,15 +39,15 @@ public class PublishDatabaseFromDataCatalog implements RequestHandler<Object, St
 		String region = Optional.ofNullable(System.getenv("region")).orElse(Regions.US_EAST_1.getName());
 		String sourceGlueCatalogId = Optional.ofNullable(System.getenv("source_glue_catalog_id")).orElse("1234567890");
 		String dbPrefixString = Optional.ofNullable(System.getenv("database_prefix_list")).orElse("");
+		String list_separator = Optional.ofNullable(System.getenv("list_separator")).orElse(",");
 		String separator = Optional.ofNullable(System.getenv("separator")).orElse("|");
 		String sqsQueue4GlueDatabase = Optional.ofNullable(System.getenv("sqs_queue_url_glue_database")).orElse("");
 
 		// Print environment variables
-		printEnvVariables(sourceGlueCatalogId, sqsQueue4GlueDatabase, dbPrefixString, separator);
+		printEnvVariables(sourceGlueCatalogId, sqsQueue4GlueDatabase, dbPrefixString, list_separator, separator);
 		
 		// Create Objects for Glue and SQS
 		AWSGlue glue = AWSGlueClientBuilder.standard().withRegion(region).build();
-//		AmazonSNS sns = AmazonSNSClientBuilder.standard().withRegion(region).build();
 		
 		// Create Objects for Utility classes
 		SQSUtil sqsUtil = new SQSUtil();
@@ -59,25 +59,26 @@ public class PublishDatabaseFromDataCatalog implements RequestHandler<Object, St
 		// Get databases from Glue
 		List<Database> dBList = glueUtil.getDatabases(glue, sourceGlueCatalogId);
 		List<Database> publishDbList;
-				
+
+		// Tokenize the database prefix string to a List of database prefixes
+		List<String> dbPrefixList = tokenizeDatabasePrefixString(dbPrefixString, region, list_separator, separator);
+
 		// When database Prefix string is empty or not provided then, it imports all databases
 		// else, it imports only the databases that has the same prefix
-		if (dbPrefixString.equalsIgnoreCase("")) {
+		if (dbPrefixList.size() == 0) {
 			System.out.println("Publishing all");
 			publishDbList = dBList;
 		} else {
-			// Tokenize the database prefix string to a List of database prefixes
-			List<String> dbPrefixList = tokenizeDatabasePrefixString(dbPrefixString, separator);
 			// Identify required databases to export
 			publishDbList = getRequiredDatabases(dBList, dbPrefixList);
-			System.out.println("Publishing matched");
+			System.out.println("Publishing matched: " + publishDbList);
 		}
 		System.out.printf(
 				"Database export statistics: number of databases exist = %d, number of databases matching prefix = %d. \n",
 				dBList.size(), publishDbList.size());
 
 		if (publishDbList.size() == 0 ) {
-			System.out.println("Not exporting any DB.  DBlist size: " + publishDbList.size());
+			System.out.println("Not exporting any DB.  DBList size: 0 ");
 		} else {
 			sqsUtil.publishDatabasesToSQS(sqs, sqsQueue4GlueDatabase, publishDbList, sourceGlueCatalogId);
 		}
@@ -89,31 +90,46 @@ public class PublishDatabaseFromDataCatalog implements RequestHandler<Object, St
 	 * @param sourceGlueCatalogId
 	 * @param sqsQueue4GlueDatabase
  	 * @param dbPrefixString
+  	 * @param list_separator
  	 * @param separator
 	 */
 	public static void printEnvVariables(String sourceGlueCatalogId, String sqsQueue4GlueDatabase,
-										 String dbPrefixString, String separator) {
+										 String dbPrefixString, String list_separator, String separator) {
 		System.out.println("SQS Queue URL: " + sqsQueue4GlueDatabase);
 		System.out.println("Source Catalog Id: " + sourceGlueCatalogId);
 		System.out.println("Database Prefix String: " + dbPrefixString);
+		System.out.println("List Separator: " + list_separator);
 		System.out.println("Prefix Separator: " + separator);
 	}
 	
 	/**
 	 * Tokenize the Data Prefix String to a List of Prefixes
 	 * @param dbPrefixString
+ 	 * @param region
+ 	 * @param list_separator
 	 * @param separator
 	 * @return
 	 */
-	public static List<String> tokenizeDatabasePrefixString(String dbPrefixString, String separator) {
-		
-		List<String> dbPrefixesList = Collections.list(new StringTokenizer(dbPrefixString, separator)).stream()
+	public static List<String> tokenizeDatabasePrefixString(String dbPrefixString, String region, String list_separator, String separator) {
+		List<String> dbPrefixesList = new ArrayList<>();
+		List<String> regionList = Collections.list(new StringTokenizer(dbPrefixString, list_separator)).stream()
 	      .map(token -> (String) token)
 	      .collect(Collectors.toList());
-		System.out.println("Number of database prefixes: " + dbPrefixesList.size());
+		System.out.println("Number of regions prefixes: " + regionList.size());
+		for (String regionL: regionList) {
+			List<String> parseList = Collections.list(new StringTokenizer(regionL, separator)).stream()
+					.map(token -> (String) token)
+					.collect(Collectors.toList());
+			if (parseList.size() > 0 && region.equals(parseList.get(0))) {
+				System.out.println("Info: Found matching region." + parseList);
+				for (int i=1; i<parseList.size(); i++)
+					dbPrefixesList.add(parseList.get(i));
+			}
+		}
+		System.out.println("Region: " + region + " primary databases are: " + dbPrefixesList);
 		return dbPrefixesList;
 	}
-	
+
 	/**
 	 * 
 	 * @param dBList
