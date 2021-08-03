@@ -11,8 +11,6 @@ import com.amazonaws.services.glue.model.Partition;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.events.SQSEvent;
-import com.amazonaws.services.sqs.AmazonSQS;
-import com.amazonaws.services.sqs.AmazonSQSClientBuilder;
 import com.google.gson.Gson;
 import com.jayway.jsonpath.JsonPath;
 import org.kai.util.Constants.AttributeValue;
@@ -151,6 +149,13 @@ public class ImportGlueDataCatalog implements RequestHandler<SQSEvent, Object> {
 
 	}
 
+	/**
+	 * Print environment variables
+	 * @param region
+	 * @param S3SourceToTargetMapList
+	 * @param S3SourceToTargetMapListSeparator
+	 * @param S3SourceToTargetMapListValuesSeparator
+	 */
 	public Map<String, String> tokenizeS3SourceToTargetMapList (String region, String S3SourceToTargetMapList, String S3SourceToTargetMapListSeparator, String S3SourceToTargetMapListValuesSeparator) {
 		Map<String, String> returnValue = new HashMap<>();
 
