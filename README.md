@@ -20,15 +20,18 @@ to multiple SNS.
 
 ## Support patterns
 ### Primary, Replica
-One Source region with 1 SNS.  One Target region with 1 SQS subscribing to Source region's SNS.
+- One Source region with the source-region deployment.
+- One Target region with the target-region deployment.
+
 ![Alt](./src/test/resources/gdccrr1.png)
 ### Primary, Multiple Replicas
-One Source region with 1 SNS.  Multiple Target regions, each with 1 SQS subscribing to Source region's SNS.
+- One Source region with the source-region deployment.
+- Many Target regions with the target-region deployment.
+
 
 ### Multiple Primary, Multiple Replicas
-Multiple regions, each acting as Source and Target.
-- The Source deployment provides 1 SNS
-- The Target deployment provides 1 SQS, and subscribe to SNS of every other region
+Every region has both the Source and Target deployments
+
   ![Alt](./src/test/resources/gdccrr2.png)
 
 ## Build Instructions
@@ -97,8 +100,7 @@ This utility uses the following AWS services
     But it would probably be better to slim down the debug logs on the Import lambda and handle exceptions in a DLQ and DLQ Lambda.  TBD.
 
 ## TBD
-- Multi-Primary 
-  - Update Source Parameters so that each database prefix is region-specific.
+- Multi-Primary
   - Update SNS Subscription so SQS can subscribe to multiple SNS, ever SNS except the one in its own region.
     - Would require refactoring SNS Subscription.  Cloudformation does not support a foreach looping,
       and AWS::SNS::Subscription Region and TopicArn expect String not List<String>.  So for SQS to subscribe to multiple
